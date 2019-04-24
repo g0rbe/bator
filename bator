@@ -1,0 +1,194 @@
+#!/bin/bash
+
+set -o errexit
+
+start(){
+
+    #Kill apps
+    echo "[i] killing apps..."
+
+    /usr/bin/killall "/usr/lib/firefox/firefox" || true
+    /usr/bin/killall "/usr/lib/chromium/chromium" || true
+    /usr/bin/killall "spotify" || true
+    /usr/bin/killall "qbittorrent" || true
+
+    #Create folder for bator
+    echo "[i] creating '/etc/bator'..."
+
+    /usr/bin/mkdir -m 0777 "/etc/bator"
+
+    #Create torrc
+    echo "[i] creating torrc..."
+
+    /usr/bin/echo "Log notice file /etc/bator/bator.log" >> /etc/bator/bator.torrc
+    /usr/bin/echo "RunAsDaemon 1" >> /etc/bator/bator.torrc
+    /usr/bin/echo "DataDirectory /var/lib/tor" >> /etc/bator/bator.torrc
+    /usr/bin/echo "HardwareAccel 1" >> /etc/bator/bator.torrc
+    /usr/bin/echo "SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /etc/bator/bator.torrc
+    /usr/bin/echo "TransPort 127.0.0.1:9040 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /etc/bator/bator.torrc
+    /usr/bin/echo "DNSPort 127.0.0.1:53" >> /etc/bator/bator.torrc
+    /usr/bin/echo "AutomapHostsOnResolve 1" >> /etc/bator/bator.torrc
+    /usr/bin/echo "AutomapHostsSuffixes .exit,.onion" >> /etc/bator/bator.torrc
+    /usr/bin/echo "VirtualAddrNetwork 10.192.0.0/10" >> /etc/bator/bator.torrc
+    /usr/bin/echo "User tor" >> /etc/bator/bator.torrc
+    /usr/bin/echo "ControlPort 9051" >> /etc/bator/bator.torrc
+    /usr/bin/echo "CookieAuthentication 1" >> /etc/bator/bator.torrc
+    /usr/bin/echo "UseEntryGuards 1" >> /etc/bator/bator.torrc
+
+    #DNS
+    echo "[i] setting DNS..."
+
+    /usr/bin/mv "/etc/resolv.conf" "/etc/bator/bator.resolvconf"
+    /usr/bin/echo -e "nameserver 127.0.0.1\n" > "/etc/resolv.conf"
+    /usr/bin/chmod 0644 "/etc/resolv.conf"
+    /usr/bin/chattr +i "/etc/resolv.conf"
+
+    #Disable IPv6
+    echo "[i] disabling IPv6..."
+
+    /usr/bin/sysctl -q -w net.ipv6.conf.all.disable_ipv6=1
+    /usr/bin/sysctl -q -w net.ipv6.conf.default.disable_ipv6=1
+
+    #Backup rules
+    echo "[i] saving iptables..."
+
+    /usr/bin/iptables-save > "/etc/bator/bator.iptables"
+
+    #Set iptables
+    echo "[i] setting iptables..."
+
+    #Flush iptables
+    /usr/bin/iptables -F
+    /usr/bin/iptables -t nat -F
+    /usr/bin/iptables -X
+
+    #Set default policy
+    /usr/bin/iptables -P INPUT DROP
+    /usr/bin/iptables -P OUTPUT DROP
+    /usr/bin/iptables -P FORWARD DROP
+
+    #Dont nat Tor
+    /usr/bin/iptables -t nat -A OUTPUT -m owner --uid-owner tor -j RETURN
+
+    #Redirect DNS
+    /usr/bin/iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
+    /usr/bin/iptables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 53
+    /usr/bin/iptables -t nat -A OUTPUT -p udp -m owner --uid-owner tor -m udp --dport 53 -j REDIRECT --to-ports 53
+
+    #Resolve .onion
+    /usr/bin/iptables -t nat -A OUTPUT -p tcp -d 10.192.0.0/10 -j REDIRECT --to-ports 9040
+    /usr/bin/iptables -t nat -A OUTPUT -p udp -d 10.192.0.0/10 -j REDIRECT --to-ports 9040
+
+    #Allow private IPs
+    /usr/bin/iptables -t nat -A OUTPUT -d 127.0.0.0/8 -j RETURN
+    /usr/bin/iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT
+    /usr/bin/iptables -t nat -A OUTPUT -d 10.0.0.0/8 -j RETURN
+    /usr/bin/iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
+    /usr/bin/iptables -t nat -A OUTPUT -d 172.16.0.0/12 -j RETURN
+    /usr/bin/iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
+    /usr/bin/iptables -t nat -A OUTPUT -d 192.168.0.0/16 -j RETURN
+    /usr/bin/iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
+
+    #Redirect everything to TransPort
+    /usr/bin/iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
+    /usr/bin/iptables -t nat -A OUTPUT -p udp -j REDIRECT --to-ports 9040
+    /usr/bin/iptables -t nat -A OUTPUT -p icmp -j REDIRECT --to-ports 9040
+
+    #Allow related + Tor output, reject others
+    /usr/bin/iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    /usr/bin/iptables -A OUTPUT -m owner --uid-owner tor -j ACCEPT
+    /usr/bin/iptables -A OUTPUT -j REJECT
+
+    #Simple stateful firewall
+    /usr/bin/iptables -A INPUT -i lo -j ACCEPT
+    /usr/bin/iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    /usr/bin/iptables -A INPUT -p tcp -j REJECT --reject-with tcp-reset
+    /usr/bin/iptables -A INPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+    /usr/bin/iptables -A INPUT -p icmp -j REJECT --reject-with icmp-port-unreachable
+    /usr/bin/iptables -A INPUT -j REJECT --reject-with icmp-proto-unreachable
+
+    #Start Tor
+    echo "[i] starting Tor..."
+
+    /usr/bin/tor -f /etc/bator/bator.torrc
+
+    echo "[+] bator started!"
+    echo "[i] you can find everything in '/etc/bator/' folder"
+
+}
+
+stop(){
+
+    #Restore DNS
+    echo "[i] restoring DNS..."
+
+    /usr/bin/chattr -i "/etc/resolv.conf"
+    /usr/bin/mv "/etc/bator/bator.resolvconf" "/etc/resolv.conf"
+
+    #Enable IPv6
+    echo "[i] enabling IPv6..."
+
+    /usr/bin/sysctl -q -w net.ipv6.conf.all.disable_ipv6=0
+    /usr/bin/sysctl -q -w net.ipv6.conf.default.disable_ipv6=0
+
+    #Flush iptables
+    echo "[i] flushing iptables..."
+
+    /usr/bin/iptables -P INPUT ACCEPT
+    /usr/bin/iptables -P FORWARD ACCEPT
+    /usr/bin/iptables -P OUTPUT ACCEPT
+    /usr/bin/iptables -F
+    /usr/bin/iptables -t nat -F
+    /usr/bin/iptables -X
+
+    #Restore iptables
+    echo "[i] restoring iptables..."
+
+    /usr/bin/iptables-restore "/etc/bator/bator.iptables"
+
+    #Kill Tor
+    echo "[i] killing Tor..."
+
+    /usr/bin/killall tor
+
+    #Remove left-over files
+    echo "[i] removing left-over files..."
+
+    /usr/bin/rm -rf /etc/bator
+
+}
+
+reload(){
+
+    #Remove previous log
+    echo "[i] removing previous log..."
+
+    /usr/bin/rm "/etc/bator/bator.log"
+
+    #Stop Tor
+    echo "[i] killing Tor..."
+
+    /usr/bin/killall tor
+
+    #Start Tor
+    echo "[i] starting Tor..."
+
+    /usr/bin/tor -f "/etc/bator/bator.torrc"
+
+}
+
+case $1 in
+    "start")
+        start
+        ;;
+    "stop")
+        stop
+        ;;
+    "reload")
+        reload
+        ;;
+    *)
+        echo "somthing went wrong!"
+        echo "given argument: $1"
+        ;;
+esac
