@@ -7,41 +7,36 @@ start(){
     #Kill apps
     echo "[i] killing apps..."
 
-    /usr/bin/killall "/usr/lib/firefox/firefox" || true
-    /usr/bin/killall "/usr/lib/chromium/chromium" || true
+    /usr/bin/killall "firefox" || true
+    /usr/bin/killall "chromium" || true
     /usr/bin/killall "spotify" || true
     /usr/bin/killall "qbittorrent" || true
-
-    #Create folder for bator
-    echo "[i] creating '/etc/bator'..."
-
-    /usr/bin/mkdir -m 0777 "/etc/bator"
 
     #Create torrc
     echo "[i] creating torrc..."
 
-    /usr/bin/echo "Log notice file /etc/bator/bator.log" >> /etc/bator/bator.torrc
-    /usr/bin/echo "RunAsDaemon 1" >> /etc/bator/bator.torrc
-    /usr/bin/echo "DataDirectory /var/lib/tor" >> /etc/bator/bator.torrc
-    /usr/bin/echo "HardwareAccel 1" >> /etc/bator/bator.torrc
-    /usr/bin/echo "SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /etc/bator/bator.torrc
-    /usr/bin/echo "TransPort 127.0.0.1:9040 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /etc/bator/bator.torrc
-    /usr/bin/echo "DNSPort 127.0.0.1:53" >> /etc/bator/bator.torrc
-    /usr/bin/echo "AutomapHostsOnResolve 1" >> /etc/bator/bator.torrc
-    /usr/bin/echo "AutomapHostsSuffixes .exit,.onion" >> /etc/bator/bator.torrc
-    /usr/bin/echo "VirtualAddrNetwork 10.192.0.0/10" >> /etc/bator/bator.torrc
-    /usr/bin/echo "User tor" >> /etc/bator/bator.torrc
-    /usr/bin/echo "ControlPort 9051" >> /etc/bator/bator.torrc
-    /usr/bin/echo "CookieAuthentication 1" >> /etc/bator/bator.torrc
-    /usr/bin/echo "UseEntryGuards 1" >> /etc/bator/bator.torrc
+    /usr/bin/echo "Log notice file /tmp/bator.log" >> /tmp/bator.torrc
+    /usr/bin/echo "RunAsDaemon 1" >> /tmp/bator.torrc
+    /usr/bin/echo "DataDirectory /var/lib/tor" >> /tmp/bator.torrc
+    /usr/bin/echo "HardwareAccel 1" >> /tmp/bator.torrc
+    /usr/bin/echo "SocksPort 127.0.0.1:9050 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /tmp/bator.torrc
+    /usr/bin/echo "TransPort 127.0.0.1:9040 IsolateDestAddr IsolateDestPort IsolateClientProtocol" >> /tmp/bator.torrc
+    /usr/bin/echo "DNSPort 127.0.0.1:53" >> /tmp/bator.torrc
+    /usr/bin/echo "AutomapHostsOnResolve 1" >> /tmp/bator.torrc
+    /usr/bin/echo "AutomapHostsSuffixes .exit,.onion" >> /tmp/bator.torrc
+    /usr/bin/echo "VirtualAddrNetwork 10.192.0.0/10" >> /tmp/bator.torrc
+    /usr/bin/echo "User tor" >> /tmp/bator.torrc
+    /usr/bin/echo "ControlPort 9051" >> /tmp/bator.torrc
+    /usr/bin/echo "CookieAuthentication 1" >> /tmp/bator.torrc
+    /usr/bin/echo "UseEntryGuards 1" >> /tmp/bator.torrc
 
     #DNS
     echo "[i] setting DNS..."
 
-    /usr/bin/mv "/etc/resolv.conf" "/etc/bator/bator.resolvconf"
-    /usr/bin/echo -e "nameserver 127.0.0.1\n" > "/etc/resolv.conf"
-    /usr/bin/chmod 0644 "/etc/resolv.conf"
-    /usr/bin/chattr +i "/etc/resolv.conf"
+    /usr/bin/mv /etc/resolv.conf /tmp/bator.resolvconf
+    /usr/bin/echo -e "nameserver 127.0.0.1\n" > /etc/resolv.conf
+    /usr/bin/chmod 0644 /etc/resolv.conf
+    /usr/bin/chattr +i /etc/resolv.conf
 
     #Disable IPv6
     echo "[i] disabling IPv6..."
@@ -52,7 +47,7 @@ start(){
     #Backup rules
     echo "[i] saving iptables..."
 
-    /usr/bin/iptables-save > "/etc/bator/bator.iptables"
+    /usr/bin/iptables-save > /tmp/bator.iptables
 
     #Set iptables
     echo "[i] setting iptables..."
@@ -110,10 +105,12 @@ start(){
     #Start Tor
     echo "[i] starting Tor..."
 
-    /usr/bin/tor -f /etc/bator/bator.torrc
+    # touch /tmp/bator.log
+    # chown tor:tor /tmp/bator.log
+    /usr/bin/tor --hush -f /tmp/bator.torrc #&> /tmp/bator.log
 
     echo "[+] bator started!"
-    echo "[i] you can find everything in '/etc/bator/' folder"
+    echo "[i] you can find everything in '/tmp' folder"
 
 }
 
@@ -122,8 +119,8 @@ stop(){
     #Restore DNS
     echo "[i] restoring DNS..."
 
-    /usr/bin/chattr -i "/etc/resolv.conf"
-    /usr/bin/mv "/etc/bator/bator.resolvconf" "/etc/resolv.conf"
+    /usr/bin/chattr -i /etc/resolv.conf
+    /usr/bin/mv /tmp/bator.resolvconf /etc/resolv.conf
 
     #Enable IPv6
     echo "[i] enabling IPv6..."
@@ -144,7 +141,7 @@ stop(){
     #Restore iptables
     echo "[i] restoring iptables..."
 
-    /usr/bin/iptables-restore "/etc/bator/bator.iptables"
+    /usr/bin/iptables-restore /tmp/bator.iptables
 
     #Kill Tor
     echo "[i] killing Tor..."
@@ -154,7 +151,7 @@ stop(){
     #Remove left-over files
     echo "[i] removing left-over files..."
 
-    /usr/bin/rm -rf /etc/bator
+    /usr/bin/rm -rf /tmp/bator.*
 
 }
 
@@ -163,7 +160,7 @@ reload(){
     #Remove previous log
     echo "[i] removing previous log..."
 
-    /usr/bin/rm "/etc/bator/bator.log"
+    /usr/bin/rm /tmp/bator.log
 
     #Stop Tor
     echo "[i] killing Tor..."
@@ -173,7 +170,7 @@ reload(){
     #Start Tor
     echo "[i] starting Tor..."
 
-    /usr/bin/tor -f "/etc/bator/bator.torrc"
+    /usr/bin/tor -f /tmp/bator.torrc
 
 }
 
