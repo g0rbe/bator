@@ -7,10 +7,10 @@ start(){
     #Kill apps
     echo "[i] killing apps..."
 
-    /usr/bin/killall "firefox" || true
-    /usr/bin/killall "chromium" || true
-    /usr/bin/killall "spotify" || true
-    /usr/bin/killall "qbittorrent" || true
+    /usr/bin/killall -q "firefox" || true
+    /usr/bin/killall -q "chromium" || true
+    /usr/bin/killall -q "spotify" || true
+    /usr/bin/killall -q "qbittorrent" || true
 
     #Create torrc
     echo "[i] creating torrc..."
@@ -24,7 +24,8 @@ start(){
     /usr/bin/echo "DNSPort 127.0.0.1:53" >> /tmp/bator.torrc
     /usr/bin/echo "AutomapHostsOnResolve 1" >> /tmp/bator.torrc
     /usr/bin/echo "AutomapHostsSuffixes .exit,.onion" >> /tmp/bator.torrc
-    /usr/bin/echo "VirtualAddrNetwork 10.192.0.0/10" >> /tmp/bator.torrc
+    /usr/bin/echo "VirtualAddrNetworkIPv4 10.192.0.0/10" >> /tmp/bator.torrc
+    /usr/bin/echo "VirtualAddrNetworkIPv6 [FC00::]/7" >> /tmp/bator.torrc
     /usr/bin/echo "User tor" >> /tmp/bator.torrc
     /usr/bin/echo "ControlPort 9051" >> /tmp/bator.torrc
     /usr/bin/echo "CookieAuthentication 1" >> /tmp/bator.torrc
@@ -38,16 +39,20 @@ start(){
     /usr/bin/chmod 0644 /etc/resolv.conf
     /usr/bin/chattr +i /etc/resolv.conf
 
-    #Disable IPv6
-    echo "[i] disabling IPv6..."
+    # Set IPv6 Privacy Addressing
+    echo "[i] setting 'Privacy Addressing'..."
 
-    /usr/bin/sysctl -q -w net.ipv6.conf.all.disable_ipv6=1
-    /usr/bin/sysctl -q -w net.ipv6.conf.default.disable_ipv6=1
+    /usr/bin/sysctl -q -w net.ipv6.conf.all.use_tempaddr=2
+    /usr/bin/sysctl -q -w net.ipv6.conf.default.use_tempaddr=2
 
     #Backup rules
     echo "[i] saving iptables..."
 
     /usr/bin/iptables-save > /tmp/bator.iptables
+
+    echo "[i] saving ip6tables..."
+
+    /usr/bin/ip6tables-save > /tmp/bator.ip6tables
 
     #Set iptables
     echo "[i] setting iptables..."
@@ -102,6 +107,52 @@ start(){
     /usr/bin/iptables -A INPUT -p icmp -j REJECT --reject-with icmp-port-unreachable
     /usr/bin/iptables -A INPUT -j REJECT --reject-with icmp-proto-unreachable
 
+    echo "[i] setting ip6tables..."
+
+    #Flush iptables
+    /usr/bin/ip6tables -F
+    /usr/bin/ip6tables -t nat -F
+    /usr/bin/ip6tables -X
+
+    #Set default policy
+    /usr/bin/ip6tables -P INPUT DROP
+    /usr/bin/ip6tables -P OUTPUT DROP
+    /usr/bin/ip6tables -P FORWARD DROP
+
+    #Dont nat Tor
+    /usr/bin/ip6tables -t nat -A OUTPUT -m owner --uid-owner tor -j RETURN
+
+    #Redirect DNS
+    /usr/bin/ip6tables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
+    /usr/bin/ip6tables -t nat -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 53
+    /usr/bin/ip6tables -t nat -A OUTPUT -p udp -m owner --uid-owner tor -m udp --dport 53 -j REDIRECT --to-ports 53
+
+    #Resolve .onion
+    /usr/bin/ip6tables -t nat -A OUTPUT -p tcp -d fc00::/7 -j REDIRECT --to-ports 9040
+    /usr/bin/ip6tables -t nat -A OUTPUT -p udp -d fc00::/7 -j REDIRECT --to-ports 9040
+
+    #Allow private IPs
+    /usr/bin/ip6tables -t nat -A OUTPUT -d ::1/128 -j RETURN
+    /usr/bin/ip6tables -A OUTPUT -d ::1/128 -j ACCEPT
+
+    #Redirect everything to TransPort
+    /usr/bin/ip6tables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports 9040
+    /usr/bin/ip6tables -t nat -A OUTPUT -p udp -j REDIRECT --to-ports 9040
+    /usr/bin/ip6tables -t nat -A OUTPUT -p icmp -j REDIRECT --to-ports 9040
+
+    #Allow related + Tor output, reject others
+    /usr/bin/ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    /usr/bin/ip6tables -A OUTPUT -m owner --uid-owner tor -j ACCEPT
+    /usr/bin/ip6tables -A OUTPUT -j REJECT
+
+    #Simple stateful firewall
+    /usr/bin/ip6tables -A INPUT -i lo -j ACCEPT
+    /usr/bin/ip6tables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    /usr/bin/ip6tables -A INPUT -p tcp -j REJECT --reject-with tcp-reset
+    /usr/bin/ip6tables -A INPUT -p udp -j REJECT
+    /usr/bin/ip6tables -A INPUT -p icmp -j REJECT
+    /usr/bin/ip6tables -A INPUT -j REJECT
+
     #Start Tor
     echo "[i] starting Tor..."
 
@@ -123,10 +174,10 @@ stop(){
     /usr/bin/mv /tmp/bator.resolvconf /etc/resolv.conf
 
     #Enable IPv6
-    echo "[i] enabling IPv6..."
+    echo "[i] disabling 'Privacy Addressing'..."
 
-    /usr/bin/sysctl -q -w net.ipv6.conf.all.disable_ipv6=0
-    /usr/bin/sysctl -q -w net.ipv6.conf.default.disable_ipv6=0
+    /usr/bin/sysctl -q -w net.ipv6.conf.all.use_tempaddr=0
+    /usr/bin/sysctl -q -w net.ipv6.conf.default.use_tempaddr=0
 
     #Flush iptables
     echo "[i] flushing iptables..."
@@ -138,10 +189,23 @@ stop(){
     /usr/bin/iptables -t nat -F
     /usr/bin/iptables -X
 
+    echo "[i] flushing ip6tables..."
+
+    /usr/bin/ip6tables -P INPUT ACCEPT
+    /usr/bin/ip6tables -P FORWARD ACCEPT
+    /usr/bin/ip6tables -P OUTPUT ACCEPT
+    /usr/bin/ip6tables -F
+    /usr/bin/ip6tables -t nat -F
+    /usr/bin/ip6tables -X
+
     #Restore iptables
     echo "[i] restoring iptables..."
 
     /usr/bin/iptables-restore /tmp/bator.iptables
+
+    echo "[i] restoring ip6tables..."
+
+    /usr/bin/ip6tables-restore /tmp/bator.ip6tables
 
     #Kill Tor
     echo "[i] killing Tor..."
@@ -185,7 +249,7 @@ case $1 in
         reload
         ;;
     *)
-        echo "somthing went wrong!"
+        echo "something went wrong!"
         echo "given argument: $1"
         ;;
 esac
