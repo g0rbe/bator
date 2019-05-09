@@ -4,6 +4,15 @@ set -o errexit
 
 start(){
 
+    #Stop NetworkManager
+    echo "[i] stopping interfaces..."
+    for INTERFACE in $(ls --hide=lo /sys/class/net)
+    do
+        /usr/bin/ip link set $INTERFACE down
+    done
+
+    sleep 1
+
     #Kill apps
     echo "[i] killing apps..."
 
@@ -11,6 +20,8 @@ start(){
     /usr/bin/killall -q "chromium" || true
     /usr/bin/killall -q "spotify" || true
     /usr/bin/killall -q "qbittorrent" || true
+
+    sleep 1
 
     #Create torrc
     echo "[i] creating torrc..."
@@ -31,6 +42,8 @@ start(){
     /usr/bin/echo "CookieAuthentication 1" >> /tmp/bator.torrc
     /usr/bin/echo "UseEntryGuards 1" >> /tmp/bator.torrc
 
+    sleep 1
+
     #DNS
     echo "[i] setting DNS..."
 
@@ -39,20 +52,28 @@ start(){
     /usr/bin/chmod 0644 /etc/resolv.conf
     /usr/bin/chattr +i /etc/resolv.conf
 
+    sleep 1
+
     # Set IPv6 Privacy Addressing
     echo "[i] setting 'Privacy Addressing'..."
 
     /usr/bin/sysctl -q -w net.ipv6.conf.all.use_tempaddr=2
     /usr/bin/sysctl -q -w net.ipv6.conf.default.use_tempaddr=2
 
+    sleep 1
+
     #Backup rules
     echo "[i] saving iptables..."
 
     /usr/bin/iptables-save > /tmp/bator.iptables
 
+    sleep 1
+
     echo "[i] saving ip6tables..."
 
     /usr/bin/ip6tables-save > /tmp/bator.ip6tables
+
+    sleep 1
 
     #Set iptables
     echo "[i] setting iptables..."
@@ -107,6 +128,8 @@ start(){
     /usr/bin/iptables -A INPUT -p icmp -j REJECT --reject-with icmp-port-unreachable
     /usr/bin/iptables -A INPUT -j REJECT --reject-with icmp-proto-unreachable
 
+    sleep 1
+
     echo "[i] setting ip6tables..."
 
     #Flush iptables
@@ -153,12 +176,19 @@ start(){
     /usr/bin/ip6tables -A INPUT -p icmp -j REJECT
     /usr/bin/ip6tables -A INPUT -j REJECT
 
+    sleep 1
+
+    #Start interfaces
+    echo "[i] starting interfaces..."
+    for INTERFACE in $(ls --hide=lo /sys/class/net)
+    do
+        /usr/bin/ip link set $INTERFACE up
+    done
+
     #Start Tor
     echo "[i] starting Tor..."
 
-    # touch /tmp/bator.log
-    # chown tor:tor /tmp/bator.log
-    /usr/bin/tor --hush -f /tmp/bator.torrc #&> /tmp/bator.log
+    /usr/bin/tor --hush -f /tmp/bator.torrc
 
     echo "[+] bator started!"
     echo "[i] you can find everything in '/tmp' folder"
@@ -167,17 +197,30 @@ start(){
 
 stop(){
 
+    #Stop interfaces
+    echo "[i] stopping interfaces..."
+    for INTERFACE in $(ls --hide=lo /sys/class/net)
+    do
+        /usr/bin/ip link set $INTERFACE down
+    done
+
+    sleep 1
+
     #Restore DNS
     echo "[i] restoring DNS..."
 
     /usr/bin/chattr -i /etc/resolv.conf
     /usr/bin/mv /tmp/bator.resolvconf /etc/resolv.conf
 
+    sleep 1
+
     #Enable IPv6
     echo "[i] disabling 'Privacy Addressing'..."
 
     /usr/bin/sysctl -q -w net.ipv6.conf.all.use_tempaddr=0
     /usr/bin/sysctl -q -w net.ipv6.conf.default.use_tempaddr=0
+
+    sleep 1
 
     #Flush iptables
     echo "[i] flushing iptables..."
@@ -189,6 +232,8 @@ stop(){
     /usr/bin/iptables -t nat -F
     /usr/bin/iptables -X
 
+    sleep 1
+
     echo "[i] flushing ip6tables..."
 
     /usr/bin/ip6tables -P INPUT ACCEPT
@@ -198,24 +243,41 @@ stop(){
     /usr/bin/ip6tables -t nat -F
     /usr/bin/ip6tables -X
 
+    sleep 1
+
     #Restore iptables
     echo "[i] restoring iptables..."
 
     /usr/bin/iptables-restore /tmp/bator.iptables
 
+    sleep 1
+
     echo "[i] restoring ip6tables..."
 
     /usr/bin/ip6tables-restore /tmp/bator.ip6tables
+
+    sleep 1
 
     #Kill Tor
     echo "[i] killing Tor..."
 
     /usr/bin/killall tor
 
+    sleep 1
+
     #Remove left-over files
     echo "[i] removing left-over files..."
 
     /usr/bin/rm -rf /tmp/bator.*
+
+    sleep 1
+    
+    #Start interfaces
+    echo "[i] starting interfaces..."
+    for INTERFACE in $(ls --hide=lo /sys/class/net)
+    do
+        /usr/bin/ip link set $INTERFACE up
+    done
 
 }
 
