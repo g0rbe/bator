@@ -4,7 +4,7 @@ set -o errexit
 
 start(){
 
-    #Stop NetworkManager
+    #Stop interfaces
     echo "[i] stopping interfaces..."
     for INTERFACE in $(ls --hide=lo /sys/class/net)
     do
@@ -271,7 +271,7 @@ stop(){
     /usr/bin/rm -rf /tmp/bator.*
 
     sleep 1
-    
+
     #Start interfaces
     echo "[i] starting interfaces..."
     for INTERFACE in $(ls --hide=lo /sys/class/net)
@@ -296,7 +296,7 @@ reload(){
     #Start Tor
     echo "[i] starting Tor..."
 
-    /usr/bin/tor -f /tmp/bator.torrc
+    /usr/bin/tor --hush -f /tmp/bator.torrc
 
 }
 
